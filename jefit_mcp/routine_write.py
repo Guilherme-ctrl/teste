@@ -91,6 +91,14 @@ def list_routines_api() -> list[dict]:
     raise RuntimeError(f"Unexpected JEFIT routines response: {type(data).__name__}")
 
 
+def _routine_id_set(routines: list[dict]) -> set[str]:
+    result = set()
+    for routine in routines:
+        if isinstance(routine, dict) and routine.get("id") not in (None, ""):
+            result.add(str(routine["id"]))
+    return result
+
+
 def get_routine_api(routine_id: str | int) -> dict:
     rid = _safe_id(routine_id, "routine_id")
     data = api("GET", f"/api/v2/routines/{rid}")
@@ -115,11 +123,19 @@ def create_routine_api(
     if day_indexing_style not in {"number", "weekday"}:
         raise ValueError("day_indexing_style must be number or weekday")
 
-    # Exact current Routine Builder flow: create a private routine and its first day.
+    # The current web builder's POST does not consistently return the new routine id.
+    # Resolve it deterministically from the authenticated user's before/after list.
+    before_ids = _routine_id_set(list_routines_api())
     created = api("POST", "/api/v2/user/routines", {"create_day": True})
     rid = _extract_id(created)
     if not rid:
-        raise RuntimeError(f"Routine was created but its id could not be resolved: {created!r}")
+        after = list_routines_api()
+        new_ids = [str(r["id"]) for r in after if isinstance(r, dict) and r.get("id") not in (None, "") and str(r["id"]) not in before_ids]
+        if len(new_ids) != 1:
+            raise RuntimeError(
+                f"Routine was created but its id could not be resolved uniquely; new ids={new_ids!r}, response={created!r}"
+            )
+        rid = new_ids[0]
     rid = _safe_id(rid, "routine_id")
 
     patch = {
@@ -262,7 +278,6 @@ def resolve_exercise(exercise: str | int) -> dict:
     if not raw:
         raise ValueError("exercise cannot be empty")
 
-    # Current JEFIT ids include encoded ids such as d_... and u_..., not only numbers.
     for key, item in db.items():
         if not isinstance(item, dict):
             continue
@@ -339,18 +354,11 @@ def update_day_exercise_sets_api(day_exercise_id: str | int, sets: list[dict]) -
         raise ValueError("sets cannot be empty")
     if len(sets) > 30:
         raise ValueError("sets cannot contain more than 30 items")
-    # JEFIT treats this as a positional patch array. Supplying a complete change
-    # object at every index also lets us establish the exact requested set count.
     changes = [_normalize_set_change(item, fill_defaults=True) for item in sets]
     return update_day_exercise_api(day_exercise_id, sets=changes)
 
 
-def patch_one_set_api(
-    day_exercise_id: str | int,
-    set_index: int,
-    set_count: int,
-    changes: dict,
-) -> dict:
+def patch_one_set_api(day_exercise_id: str | int, set_index: int, set_count: int, changes: dict) -> dict:
     index = int(set_index)
     count = int(set_count)
     if count < 1 or count > 30:
@@ -411,7 +419,6 @@ def add_exercise_to_day_api(
     resolved = resolve_exercise(exercise)
     exercise_id = _safe_id(resolved["id"], "exercise_id")
 
-    # Exact current Routine Builder payload.
     created = api(
         "POST",
         f"/api/v2/days/{did}/day_exercises",
@@ -468,8 +475,12 @@ def create_routine_with_days_api(
         routine = get_routine_api(rid)
         existing_days = routine.get("days") if isinstance(routine.get("days"), list) else []
         if not existing_days:
-            first = add_routine_day_api(rid, name=str(days[0].get("name") or "Day 1"), index=1,
-                                        day_of_week=days[0].get("day_of_week"))
+            first = add_routine_day_api(
+                rid,
+                name=str(days[0].get("name") or "Day 1"),
+                index=1,
+                day_of_week=days[0].get("day_of_week"),
+            )
         else:
             first = existing_days[0]
             first_id = _extract_id(first)
