@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, date
 
@@ -7,6 +8,7 @@ from auth import get_access_token, get_user_id
 from history import get_workout_history
 from workout_info import get_workout_for_date
 from routine_write import (
+    api,
     list_routines_api,
     get_routine_api,
     create_routine_api,
@@ -234,8 +236,20 @@ def _smoke_test():
         print(f"ROUTINE_SMOKE_TEST_FAILED {type(exc).__name__}: {exc}", flush=True)
 
 
+def _routine_diag():
+    if os.getenv("JEFIT_ROUTINE_DIAG") != "1":
+        return
+    try:
+        raw = api("GET", "/api/v2/user/routines", unwrap=False)
+        text = json.dumps(raw, ensure_ascii=False, default=str)
+        print("ROUTINE_DIAG_RAW " + text[:12000], flush=True)
+    except Exception as exc:
+        print(f"ROUTINE_DIAG_FAILED {type(exc).__name__}: {exc}", flush=True)
+
+
 def main():
     _smoke_test()
+    _routine_diag()
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
     mcp.run(host=host, port=port, transport="streamable-http")
