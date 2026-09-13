@@ -1,0 +1,32 @@
+name: JEFIT routine probe
+
+on:
+  push:
+    branches: [jefit-mcp]
+    paths:
+      - 'jefit_mcp/probe.py'
+      - '.github/workflows/jefit-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - name: Probe JEFIT builder
+        run: python jefit_mcp/probe.py > probe-output.txt 2>&1
+      - name: Show output
+        if: always()
+        run: cat probe-output.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jefit-probe-output
+          path: probe-output.txt
